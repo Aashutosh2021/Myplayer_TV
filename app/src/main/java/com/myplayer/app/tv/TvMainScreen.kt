@@ -1,126 +1,60 @@
 package com.myplayer.app.tv
 
+import android.Manifest
+import android.content.pm.PackageManager
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.BorderStroke
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.focusable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.zIndex
+import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.paging.compose.collectAsLazyPagingItems
-import com.myplayer.app.data.local.entity.SongEntity
-import com.myplayer.app.data.recommendation.model.RecommendationSong
+import com.myplayer.app.data.recognize.RecognizerUiState
+import com.myplayer.app.sync.ui.SyncPlayViewModel
 import com.myplayer.app.ui.common.AlbumArtImage
 import com.myplayer.app.ui.screens.home.HomeViewModel
+import com.myplayer.app.ui.screens.library.LibraryViewModel
+import com.myplayer.app.ui.screens.library.PlaylistDetailViewModel
 import com.myplayer.app.ui.screens.main.MainViewModel
-import com.myplayer.app.ui.screens.nowplaying.LyricsUiState
 import com.myplayer.app.ui.screens.nowplaying.LyricsViewModel
 import com.myplayer.app.ui.screens.search.OnlineSearchViewModel
+import com.myplayer.app.ui.screens.settings.SettingsViewModel
+import java.util.Calendar
 
 enum class TvDestination(val label: String, val icon: ImageVector) {
     HOME("Home", Icons.Rounded.Home),
     HOTLIST("Hotlist", Icons.Rounded.Whatshot),
     SEARCH("Search", Icons.Rounded.Search),
     LIBRARY("Library", Icons.Rounded.LibraryMusic),
-    NOW_PLAYING("Now Playing", Icons.Rounded.Album),
-    PHONE_REMOTE("Phone Remote", Icons.Rounded.QrCode2)
-}
-
-/**
- * OpenTune TvSurface ported to MyPlayer TV:
- * Every card, pill, and button scales up (1.06x) with a glowing white focus border when
- * navigated via Android TV D-Pad Remote or hovered with a pointer/mouse!
- */
-@Composable
-fun TvFocusableSurface(
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    shape: Shape = RoundedCornerShape(18.dp),
-    focusedScale: Float = 1.06f,
-    containerColor: Color = Color(0xFF181826),
-    focusedContainerColor: Color = Color(0xFF2B2244),
-    showFocusRing: Boolean = true,
-    content: @Composable BoxScope.(isFocused: Boolean) -> Unit
-) {
-    var isFocused by remember { mutableStateOf(false) }
-    val interactionSource = remember { MutableInteractionSource() }
-    val isHovered by interactionSource.collectIsHoveredAsState()
-    val highlighted = isFocused || isHovered
-
-    val scale by animateFloatAsState(
-        targetValue = if (highlighted) focusedScale else 1f,
-        animationSpec = tween(140),
-        label = "tvScale"
-    )
-    val bg by animateColorAsState(
-        targetValue = if (highlighted) focusedContainerColor else containerColor,
-        animationSpec = tween(140),
-        label = "tvBg"
-    )
-
-    Box(
-        modifier = modifier
-            .zIndex(if (highlighted) 2f else 0f)
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-            }
-            .onFocusChanged { isFocused = it.isFocused || it.hasFocus }
-            .clip(shape)
-            .background(bg)
-            .then(
-                if (highlighted && showFocusRing) {
-                    Modifier.border(2.5.dp, Color.White, shape)
-                } else {
-                    Modifier.border(1.dp, Color.White.copy(alpha = 0.08f), shape)
-                }
-            )
-            .focusable(interactionSource = interactionSource)
-            .clickable(
-                interactionSource = interactionSource,
-                indication = null,
-                role = Role.Button,
-                onClick = onClick
-            ),
-        content = { content(highlighted) }
-    )
+    NOW_PLAYING("Player", Icons.Rounded.Album),
+    AUDIO_LAB("Audio Lab", Icons.Rounded.Tune),
+    PHONE_REMOTE("Remote", Icons.Rounded.QrCode2)
 }
 
 @Composable
@@ -130,7 +64,12 @@ fun TvMainScreen(
     mainViewModel: MainViewModel = hiltViewModel(),
     homeViewModel: HomeViewModel = hiltViewModel(),
     searchViewModel: OnlineSearchViewModel = hiltViewModel(),
-    lyricsViewModel: LyricsViewModel = hiltViewModel()
+    lyricsViewModel: LyricsViewModel = hiltViewModel(),
+    libraryViewModel: LibraryViewModel = hiltViewModel(),
+    playlistDetailViewModel: PlaylistDetailViewModel = hiltViewModel(),
+    settingsViewModel: SettingsViewModel = hiltViewModel(),
+    syncPlayViewModel: SyncPlayViewModel = hiltViewModel(),
+    tvExtrasViewModel: TvExtrasViewModel = hiltViewModel()
 ) {
     var activeTab by remember { mutableStateOf(TvDestination.HOME) }
     val scope = rememberCoroutineScope()
@@ -140,8 +79,6 @@ fun TvMainScreen(
     val isPlaying by mainViewModel.isPlaying.collectAsStateWithLifecycle()
     val positionMs by mainViewModel.currentPosition.collectAsStateWithLifecycle()
     val durationMs by mainViewModel.currentDuration.collectAsStateWithLifecycle()
-    val audioQuality by mainViewModel.currentAudioQuality.collectAsStateWithLifecycle()
-    val isFavorite by mainViewModel.isFavorite.collectAsStateWithLifecycle()
 
     val displayTitle = currentSong?.title ?: currentOnlineSong?.title ?: ""
     val displayArtist = currentSong?.artist ?: currentOnlineSong?.artist ?: ""
@@ -156,6 +93,8 @@ fun TvMainScreen(
                     "next" -> mainViewModel.skipToNext()
                     "prev" -> mainViewModel.skipToPrevious()
                     "fav" -> mainViewModel.toggleFavorite()
+                    "shuffle" -> mainViewModel.toggleShuffle()
+                    "repeat" -> mainViewModel.cycleRepeatMode()
                     "seek_fwd" -> mainViewModel.seekTo((positionMs + 10_000L).coerceAtMost(durationMs.coerceAtLeast(10_000L)))
                     "seek_back" -> mainViewModel.seekTo((positionMs - 10_000L).coerceAtLeast(0L))
                     "search_play" -> {
@@ -193,11 +132,11 @@ fun TvMainScreen(
             .fillMaxSize()
             .background(
                 Brush.radialGradient(
-                    colors = listOf(Color(0xFF1F1135), Color(0xFF0B0B12)),
-                    radius = 1600f
+                    colors = listOf(Color(0xFF1F1135), Color(0xFF0A0A12)),
+                    radius = 1650f
                 )
             )
-            .padding(horizontal = 36.dp, vertical = 24.dp)
+            .padding(horizontal = 32.dp, vertical = 20.dp)
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
             // ── TOP 10-FOOT TV NAVIGATION BAR + MINI NOW-PLAYING PILL ──
@@ -206,124 +145,138 @@ fun TvMainScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Row(
+                LazyRow(
+                    modifier = Modifier.weight(1f),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    // MyPlayer TV Brand Pill
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .background(Brush.horizontalGradient(listOf(Color(0xFF6D28D9), Color(0xFFBE185D))))
-                            .padding(horizontal = 16.dp, vertical = 8.dp)
-                    ) {
-                        Icon(Icons.Rounded.Tv, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text("MYPLAYER TV", color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
+                    item {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(Brush.horizontalGradient(listOf(Color(0xFF6D28D9), Color(0xFFBE185D))))
+                                .padding(horizontal = 14.dp, vertical = 8.dp)
+                        ) {
+                            Icon(Icons.Rounded.Tv, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(7.dp))
+                            Text("MYPLAYER TV", color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 13.sp)
+                        }
                     }
-
-                    TvDestination.values().forEach { tab ->
+                    items(TvDestination.entries) { tab ->
                         val selected = activeTab == tab
                         TvFocusableSurface(
                             onClick = { activeTab = tab },
                             shape = RoundedCornerShape(50),
-                            containerColor = if (selected) Color.White.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.06f),
-                            focusedContainerColor = Color(0xFF7C3AED)
+                            containerColor = if (selected) Color.White.copy(alpha = 0.20f) else Color.White.copy(alpha = 0.06f),
+                            focusedContainerColor = TvAccentPurple
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Icon(
                                     imageVector = tab.icon,
                                     contentDescription = tab.label,
                                     tint = Color.White,
-                                    modifier = Modifier.size(20.dp)
+                                    modifier = Modifier.size(18.dp)
                                 )
-                                Spacer(Modifier.width(8.dp))
+                                Spacer(Modifier.width(7.dp))
                                 Text(
                                     text = tab.label,
                                     color = Color.White,
                                     fontWeight = if (selected) FontWeight.ExtraBold else FontWeight.Medium,
-                                    fontSize = 14.sp
+                                    fontSize = 13.sp
                                 )
                             }
                         }
                     }
                 }
 
-                // Top-Right Quick Now-Playing Pill (Jump to Fullscreen TV Player)
-                if (displayTitle.isNotBlank()) {
+                // Quick Jump Mini-Player Pill
+                if (displayTitle.isNotBlank() && activeTab != TvDestination.NOW_PLAYING) {
+                    Spacer(Modifier.width(14.dp))
                     TvFocusableSurface(
                         onClick = { activeTab = TvDestination.NOW_PLAYING },
                         shape = RoundedCornerShape(50),
-                        containerColor = Color(0xFF3B1254),
-                        focusedContainerColor = Color(0xFF831886)
+                        containerColor = TvAccentPurple.copy(alpha = 0.28f),
+                        focusedContainerColor = TvAccentPurple
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             AlbumArtImage(
-                                uri = displayArt,
-                                title = displayTitle,
-                                artist = displayArtist,
-                                size = 34.dp,
-                                shape = CircleShape,
-                                iconSize = 18.dp
+                                data = displayArt,
+                                contentDescription = displayTitle,
+                                modifier = Modifier
+                                    .size(30.dp)
+                                    .clip(CircleShape)
                             )
                             Spacer(Modifier.width(10.dp))
                             Column(modifier = Modifier.widthIn(max = 180.dp)) {
-                                Text(displayTitle, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text(displayArtist, color = Color.White.copy(alpha = 0.75f), fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(
+                                    text = displayTitle,
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = if (isPlaying) "Playing • $displayArtist" else "Paused • $displayArtist",
+                                    color = Color.White.copy(alpha = 0.72f),
+                                    fontSize = 11.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
                             }
-                            Spacer(Modifier.width(10.dp))
-                            Icon(
-                                imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                                contentDescription = null,
-                                tint = Color.White
-                            )
                         }
                     }
                 }
             }
 
-            Spacer(Modifier.height(22.dp))
+            Spacer(Modifier.height(18.dp))
 
-            // ── MAIN TV PAGE BODY ──
-            Box(modifier = Modifier.fillMaxSize()) {
+            // ── ACTIVE TV TAB CONTENT ──
+            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 when (activeTab) {
-                    TvDestination.HOME -> TvHomeBrowseContent(
+                    TvDestination.HOME -> TvHomeTab(
+                        homeViewModel = homeViewModel,
+                        onOpenNowPlaying = { activeTab = TvDestination.NOW_PLAYING },
+                        onOpenHotlist = { activeTab = TvDestination.HOTLIST }
+                    )
+                    TvDestination.HOTLIST -> TvHotlistAndGenresTab(
                         homeViewModel = homeViewModel,
                         onOpenNowPlaying = { activeTab = TvDestination.NOW_PLAYING }
                     )
-                    TvDestination.HOTLIST -> TvHotlistContent(
-                        homeViewModel = homeViewModel,
-                        onOpenNowPlaying = { activeTab = TvDestination.NOW_PLAYING }
-                    )
-                    TvDestination.SEARCH -> TvSearchContent(
+                    TvDestination.SEARCH -> TvSearchAndShazamTab(
                         searchViewModel = searchViewModel,
-                        onOpenNowPlaying = { activeTab = TvDestination.NOW_PLAYING }
-                    )
-                    TvDestination.LIBRARY -> TvLibraryContent(
                         homeViewModel = homeViewModel,
+                        tvExtrasViewModel = tvExtrasViewModel,
                         onOpenNowPlaying = { activeTab = TvDestination.NOW_PLAYING }
                     )
-                    TvDestination.NOW_PLAYING -> TvNowPlayingContent(
-                        title = displayTitle,
-                        artist = displayArtist,
-                        artUri = displayArt,
-                        isPlaying = isPlaying,
-                        isFavorite = isFavorite,
-                        positionMs = positionMs,
-                        durationMs = durationMs.coerceAtLeast(1L),
-                        codecLabel = "${audioQuality.codec} • ${audioQuality.sampleRateHz / 1000.0} kHz",
+                    TvDestination.LIBRARY -> TvLibraryTab(
                         mainViewModel = mainViewModel,
-                        lyricsViewModel = lyricsViewModel
+                        libraryViewModel = libraryViewModel,
+                        playlistDetailViewModel = playlistDetailViewModel,
+                        settingsViewModel = settingsViewModel,
+                        onOpenNowPlaying = { activeTab = TvDestination.NOW_PLAYING }
                     )
-                    TvDestination.PHONE_REMOTE -> TvPhoneRemotePairingContent(
-                        lanUrl = remoteLanUrl ?: "Connect TV to Wi-Fi LAN"
+                    TvDestination.NOW_PLAYING -> TvNowPlayingScreen(
+                        mainViewModel = mainViewModel,
+                        lyricsViewModel = lyricsViewModel,
+                        tvExtrasViewModel = tvExtrasViewModel
+                    )
+                    TvDestination.AUDIO_LAB -> TvAudioLabAndSettingsTab(
+                        tvExtrasViewModel = tvExtrasViewModel,
+                        settingsViewModel = settingsViewModel,
+                        syncPlayViewModel = syncPlayViewModel
+                    )
+                    TvDestination.PHONE_REMOTE -> TvPhoneRemoteTab(
+                        remoteUrl = remoteLanUrl,
+                        displayTitle = displayTitle,
+                        displayArtist = displayArtist
                     )
                 }
             }
@@ -332,156 +285,182 @@ fun TvMainScreen(
 }
 
 @Composable
-private fun TvHomeBrowseContent(
+private fun TvHomeTab(
     homeViewModel: HomeViewModel,
-    onOpenNowPlaying: () -> Unit
+    onOpenNowPlaying: () -> Unit,
+    onOpenHotlist: () -> Unit
 ) {
-    val aiSongs by homeViewModel.recommendations.collectAsStateWithLifecycle()
-    val hotlist by homeViewModel.hotlistSongs.collectAsStateWithLifecycle()
-    val recent by homeViewModel.recentSongs.collectAsStateWithLifecycle()
+    val recommendations by homeViewModel.recommendations.collectAsStateWithLifecycle()
+    val hotlistSongs by homeViewModel.hotlistSongs.collectAsStateWithLifecycle()
+    val recentSongs by homeViewModel.recentSongs.collectAsStateWithLifecycle()
+    val favoriteSongs by homeViewModel.favoriteSongs.collectAsStateWithLifecycle()
+    val selectedCategory by homeViewModel.selectedCategory.collectAsStateWithLifecycle()
+    val currentSong by homeViewModel.currentSong.collectAsStateWithLifecycle()
+    val userName by homeViewModel.userName.collectAsStateWithLifecycle()
 
-    val moodCategories = listOf("All", "Party", "Chill", "Workout", "Hip Hop", "Sad", "Late Night", "Deep Focus")
+    val hour = remember { Calendar.getInstance().get(Calendar.HOUR_OF_DAY) }
+    val (daylistTitle, daylistSub) = remember(hour, userName) {
+        val who = userName.ifBlank { "MyPlayer" }
+        when (hour) {
+            in 5..11 -> "Morning Daylist for $who" to "Fresh acoustic & energetic picks to start your day"
+            in 12..16 -> "Afternoon Focus Mix" to "Smooth flow & trending hits for your afternoon"
+            in 17..20 -> "Evening Chill Daylist" to "Unwind on the big screen with curated living-room vibes"
+            else -> "Late Night Lo-Fi & Soul" to "Deep, relaxing late-night soundscapes"
+        }
+    }
+
+    val quickMoods = listOf("All", "Bollywood", "Punjabi", "Lo-Fi", "Chill", "Workout", "Party", "Romantic")
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(24.dp),
-        contentPadding = PaddingValues(bottom = 40.dp)
+        contentPadding = PaddingValues(bottom = 32.dp)
     ) {
-        // Mood & Vibe Filter Row
+        // 1. OpenTune Daylist Hero Banner
         item {
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                items(moodCategories) { category ->
-                    TvFocusableSurface(
-                        onClick = {
-                            if (category == "All") {
-                                homeViewModel.selectCategory("All")
-                            } else {
-                                homeViewModel.playCategory(category) { onOpenNowPlaying() }
-                            }
-                        },
-                        shape = RoundedCornerShape(50),
-                        containerColor = Color(0xFF211C35),
-                        focusedContainerColor = Color(0xFF9333EA)
-                    ) {
-                        Text(
-                            text = category,
-                            color = Color.White,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp,
-                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
-                        )
-                    }
-                }
-            }
-        }
-
-        // Row 1: AI Neural Hash Recommendations
-        if (aiSongs.isNotEmpty()) {
-            item {
-                TvSectionHeader("AI Recommended For You", "128-D Neural Hash + Bandit Engine")
-                Spacer(Modifier.height(12.dp))
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-                    itemsIndexed(aiSongs.take(20)) { idx, song ->
-                        TvRecommendationSongCard(
-                            song = song,
-                            onClick = {
-                                homeViewModel.playRecommendedSongs(aiSongs, idx)
-                                onOpenNowPlaying()
-                            }
-                        )
-                    }
-                }
-            }
-        }
-
-        // Row 2: World Trending Hotlist
-        if (hotlist.isNotEmpty()) {
-            item {
-                TvSectionHeader("World Trending Hotlist", "Instant 0ms Prefetched Streams")
-                Spacer(Modifier.height(12.dp))
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-                    itemsIndexed(hotlist.take(20)) { idx, song ->
-                        TvRecommendationSongCard(
-                            song = song,
-                            onClick = {
-                                homeViewModel.playRecommendedSongs(hotlist, idx)
-                                onOpenNowPlaying()
-                            }
-                        )
-                    }
-                }
-            }
-        }
-
-        // Row 3: Offline & Recently Downloaded
-        if (recent.isNotEmpty()) {
-            item {
-                TvSectionHeader("Offline & Recent Songs", "Saved on Your TV Storage")
-                Spacer(Modifier.height(12.dp))
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-                    itemsIndexed(recent.take(20)) { idx, song ->
-                        TvLocalSongCard(
-                            song = song,
-                            onClick = {
-                                homeViewModel.playSong(recent, idx)
-                                onOpenNowPlaying()
-                            }
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun TvHotlistContent(
-    homeViewModel: HomeViewModel,
-    onOpenNowPlaying: () -> Unit
-) {
-    val hotlist by homeViewModel.hotlistSongs.collectAsStateWithLifecycle()
-    Column(modifier = Modifier.fillMaxSize()) {
-        TvSectionHeader("Top 50 Trending Hotlist", "Use D-Pad Remote to Select Any Track")
-        Spacer(Modifier.height(14.dp))
-        LazyColumn(
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            contentPadding = PaddingValues(bottom = 36.dp)
-        ) {
-            itemsIndexed(hotlist) { index, song ->
-                TvFocusableSurface(
-                    onClick = {
-                        homeViewModel.playRecommendedSongs(hotlist, index)
+            TvFocusableSurface(
+                onClick = {
+                    val pool = recommendations.ifEmpty { hotlistSongs }
+                    if (pool.isNotEmpty()) {
+                        homeViewModel.playRecommendedSongs(pool, 0)
                         onOpenNowPlaying()
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    focusedScale = 1.02f
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(22.dp),
+                focusedScale = 1.02f,
+                containerColor = Color(0xFF22163D),
+                focusedContainerColor = Color(0xFF331F5C)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            Brush.horizontalGradient(
+                                listOf(Color(0xFF4C1D95).copy(alpha = 0.65f), Color(0xFF9D174D).copy(alpha = 0.45f))
+                            )
+                        )
+                        .padding(22.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("DAYLIST • TV BIG SCREEN", color = Color(0xFFE9D5FF), fontSize = 11.sp, fontWeight = FontWeight.ExtraBold)
+                        Spacer(Modifier.height(6.dp))
+                        Text(daylistTitle, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold)
+                        Spacer(Modifier.height(4.dp))
+                        Text(daylistSub, color = Color.White.copy(alpha = 0.78f), fontSize = 14.sp)
+                    }
                     Row(
+                        verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 18.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                            .clip(RoundedCornerShape(50))
+                            .background(Color.White)
+                            .padding(horizontal = 20.dp, vertical = 12.dp)
                     ) {
-                        Text(
-                            text = "#${index + 1}",
-                            color = Color(0xFFA855F7),
-                            fontWeight = FontWeight.ExtraBold,
-                            fontSize = 18.sp,
-                            modifier = Modifier.width(48.dp)
-                        )
-                        AlbumArtImage(
-                            uri = song.thumbnailUrl,
+                        Icon(Icons.Rounded.PlayArrow, contentDescription = null, tint = Color.Black)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Play Daylist", color = Color.Black, fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
+                    }
+                }
+            }
+        }
+
+        // 2. Quick Mood Filter Pills
+        item {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                items(quickMoods) { mood ->
+                    TvActionChip(
+                        label = mood,
+                        selected = selectedCategory.equals(mood, ignoreCase = true),
+                        accentColor = TvAccentPurple,
+                        onClick = { homeViewModel.selectCategory(mood) }
+                    )
+                }
+                item {
+                    TvActionChip(
+                        label = "All Genres →",
+                        icon = Icons.Rounded.Explore,
+                        accentColor = TvAccentPink,
+                        onClick = onOpenHotlist
+                    )
+                }
+            }
+        }
+
+        // 3. AI Recommended / Quick Picks
+        if (recommendations.isNotEmpty()) {
+            item {
+                TvSectionHeader(
+                    title = if (selectedCategory == "All") "Quick Picks & AI Recommended" else "$selectedCategory Radio",
+                    subtitle = "Tailored to your listening taste & connected accounts"
+                )
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    itemsIndexed(recommendations.take(25)) { idx, song ->
+                        TvPosterCard(
                             title = song.title,
-                            artist = song.artist,
-                            size = 54.dp,
-                            shape = RoundedCornerShape(12.dp)
+                            subtitle = song.artist,
+                            artworkUrl = song.thumbnailUrl,
+                            isActive = currentSong?.id == song.videoId,
+                            onClick = {
+                                homeViewModel.playRecommendedSongs(recommendations, idx)
+                                onOpenNowPlaying()
+                            }
                         )
-                        Spacer(Modifier.width(16.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(song.title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(song.artist, color = Color.White.copy(alpha = 0.72f), fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
-                        Icon(Icons.Rounded.PlayCircleFilled, contentDescription = null, tint = Color.White, modifier = Modifier.size(32.dp))
+                    }
+                }
+            }
+        }
+
+        // 4. World Trending Hotlist
+        if (hotlistSongs.isNotEmpty()) {
+            item {
+                TvSectionHeader(
+                    title = "Trending Now",
+                    subtitle = "Top charts across YouTube Music & global feeds",
+                    trailing = {
+                        TvActionChip(label = "See Top 50", onClick = onOpenHotlist)
+                    }
+                )
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    itemsIndexed(hotlistSongs.take(20)) { idx, song ->
+                        TvPosterCard(
+                            title = song.title,
+                            subtitle = song.artist,
+                            artworkUrl = song.thumbnailUrl,
+                            badge = "#${idx + 1}",
+                            isActive = currentSong?.id == song.videoId,
+                            onClick = {
+                                homeViewModel.playRecommendedSongs(hotlistSongs, idx)
+                                onOpenNowPlaying()
+                            }
+                        )
+                    }
+                }
+            }
+        }
+
+        // 5. Favorites & Offline Downloads
+        val localPool = (favoriteSongs + recentSongs).distinctBy { it.id }
+        if (localPool.isNotEmpty()) {
+            item {
+                TvSectionHeader(
+                    title = "Your Favorites & Offline Library",
+                    subtitle = "Instant zero-buffering playback"
+                )
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    itemsIndexed(localPool.take(20)) { idx, song ->
+                        TvPosterCard(
+                            title = song.title,
+                            subtitle = song.artist,
+                            artworkUrl = song.albumArt,
+                            badge = "OFFLINE",
+                            isActive = currentSong?.id == song.id,
+                            onClick = {
+                                homeViewModel.playSong(localPool, idx)
+                                onOpenNowPlaying()
+                            }
+                        )
                     }
                 }
             }
@@ -490,46 +469,104 @@ private fun TvHotlistContent(
 }
 
 @Composable
-private fun TvSearchContent(
+private fun TvSearchAndShazamTab(
     searchViewModel: OnlineSearchViewModel,
+    homeViewModel: HomeViewModel,
+    tvExtrasViewModel: TvExtrasViewModel,
     onOpenNowPlaying: () -> Unit
 ) {
+    val context = LocalContext.current
     val query by searchViewModel.query.collectAsStateWithLifecycle()
-    val pagingItems = searchViewModel.searchResults.collectAsLazyPagingItems()
+    val recentSearches by searchViewModel.recentSearches.collectAsStateWithLifecycle(initialValue = emptyList())
+    val playedHistory by searchViewModel.playedHistory.collectAsStateWithLifecycle()
+    val searchResults = searchViewModel.searchResults.collectAsLazyPagingItems()
+    val shazamState by tvExtrasViewModel.shazamState.collectAsStateWithLifecycle()
+
+    val micPermLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) tvExtrasViewModel.startShazam()
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        OutlinedTextField(
-            value = query,
-            onValueChange = { searchViewModel.onQueryChange(it) },
-            placeholder = { Text("Search songs, artists, or use TV remote mic...", color = Color.White.copy(alpha = 0.55f)) },
-            leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null, tint = Color.White) },
-            singleLine = true,
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedTextColor = Color.White,
-                unfocusedTextColor = Color.White,
-                focusedBorderColor = Color(0xFFA855F7),
-                unfocusedBorderColor = Color.White.copy(alpha = 0.25f)
-            ),
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            keyboardActions = KeyboardActions(onSearch = { searchViewModel.onSearch(query) }),
-            modifier = Modifier.fillMaxWidth()
-        )
-        Spacer(Modifier.height(18.dp))
-
-        LazyColumn(
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            contentPadding = PaddingValues(bottom = 36.dp)
+        // Search Input + Shazam Song Recognition Button
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            items(pagingItems.itemCount) { index ->
-                val song = pagingItems[index] ?: return@items
+            OutlinedTextField(
+                value = query,
+                onValueChange = { searchViewModel.onQueryChange(it) },
+                placeholder = { Text("Search songs, artists, albums (or use TV Voice Remote)...") },
+                leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null, tint = Color.White) },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = { searchViewModel.onSearch(query) }),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White,
+                    focusedBorderColor = Color.White,
+                    unfocusedBorderColor = Color.White.copy(alpha = 0.25f)
+                ),
+                modifier = Modifier.weight(1f)
+            )
+            TvActionChip(
+                label = "Search",
+                icon = Icons.Rounded.Search,
+                selected = true,
+                accentColor = TvAccentPurple,
+                onClick = { searchViewModel.onSearch(query) }
+            )
+            val isListening = shazamState is RecognizerUiState.Listening
+            TvActionChip(
+                label = if (isListening) "Listening..." else "Recognize Song",
+                icon = if (isListening) Icons.Rounded.GraphicEq else Icons.Rounded.Mic,
+                selected = isListening,
+                accentColor = TvAccentPink,
+                onClick = {
+                    if (isListening) {
+                        tvExtrasViewModel.cancelShazam()
+                    } else {
+                        val hasMic = ContextCompat.checkSelfPermission(
+                            context, Manifest.permission.RECORD_AUDIO
+                        ) == PackageManager.PERMISSION_GRANTED
+                        if (hasMic) tvExtrasViewModel.startShazam()
+                        else micPermLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                    }
+                }
+            )
+        }
+
+        // Shazam Live Status / Match Banner
+        when (val st = shazamState) {
+            is RecognizerUiState.Listening -> {
+                Spacer(Modifier.height(10.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(TvAccentPink.copy(alpha = 0.22f))
+                        .padding(14.dp)
+                ) {
+                    Text(
+                        "Listening via TV/Remote mic (${"%.1f".format(st.seconds)}s) — Hold music near mic...",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+            is RecognizerUiState.Found -> {
+                Spacer(Modifier.height(10.dp))
                 TvFocusableSurface(
                     onClick = {
-                        val snapshot = (0 until minOf(pagingItems.itemCount, 25)).mapNotNull { pagingItems[it] }
-                        searchViewModel.playSongFromSearch(song, snapshot)
-                        onOpenNowPlaying()
+                        homeViewModel.playRecognizedSong(st.song.title, st.song.artist, st.song.coverUrl) {
+                            tvExtrasViewModel.resetShazam()
+                            onOpenNowPlaying()
+                        }
                     },
                     modifier = Modifier.fillMaxWidth(),
-                    focusedScale = 1.02f
+                    containerColor = TvAccentGreen.copy(alpha = 0.25f)
                 ) {
                     Row(
                         modifier = Modifier
@@ -537,371 +574,186 @@ private fun TvSearchContent(
                             .padding(14.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        AlbumArtImage(
-                            uri = song.thumbnailUrl,
-                            title = song.title,
-                            artist = song.artist,
-                            size = 56.dp,
-                            shape = RoundedCornerShape(12.dp)
-                        )
-                        Spacer(Modifier.width(16.dp))
+                        Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = TvAccentGreen)
+                        Spacer(Modifier.width(12.dp))
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(song.title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(song.artist, color = Color.White.copy(alpha = 0.72f), fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text("Matched: ${st.song.title}", color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 16.sp)
+                            Text(st.song.artist, color = Color.White.copy(alpha = 0.75f), fontSize = 13.sp)
                         }
-                        Text(song.durationText, color = Color.White.copy(alpha = 0.6f), fontSize = 13.sp)
+                        Text("Press OK to Play", color = Color.White, fontWeight = FontWeight.Bold)
                     }
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun TvLibraryContent(
-    homeViewModel: HomeViewModel,
-    onOpenNowPlaying: () -> Unit
-) {
-    val favorites by homeViewModel.favoriteSongs.collectAsStateWithLifecycle()
-    val downloads by homeViewModel.allSongs.collectAsStateWithLifecycle()
-
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.spacedBy(24.dp),
-        contentPadding = PaddingValues(bottom = 36.dp)
-    ) {
-        item {
-            TvSectionHeader("Favorite Songs (${favorites.size})", "Synced Across Your Library")
-            Spacer(Modifier.height(12.dp))
-            if (favorites.isEmpty()) {
-                Text("No favorite songs yet. Press the Heart icon on any playing track!", color = Color.White.copy(alpha = 0.6f))
-            } else {
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-                    itemsIndexed(favorites) { idx, song ->
-                        TvLocalSongCard(song = song) {
-                            homeViewModel.playSong(favorites, idx)
-                            onOpenNowPlaying()
-                        }
-                    }
-                }
+            is RecognizerUiState.Failed -> {
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "Recognition: ${st.reason}",
+                    color = TvAccentAmber,
+                    fontSize = 13.sp,
+                    modifier = Modifier.padding(horizontal = 4.dp)
+                )
             }
+            else -> Unit
         }
 
-        item {
-            TvSectionHeader("Offline Downloads (${downloads.size})", "Plays Instantly Without Internet")
-            Spacer(Modifier.height(12.dp))
-            if (downloads.isEmpty()) {
-                Text("No offline downloads saved yet.", color = Color.White.copy(alpha = 0.6f))
-            } else {
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-                    itemsIndexed(downloads) { idx, song ->
-                        TvLocalSongCard(song = song) {
-                            homeViewModel.playSong(downloads, idx)
-                            onOpenNowPlaying()
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
+        Spacer(Modifier.height(14.dp))
 
-@Composable
-private fun TvNowPlayingContent(
-    title: String,
-    artist: String,
-    artUri: String?,
-    isPlaying: Boolean,
-    isFavorite: Boolean,
-    positionMs: Long,
-    durationMs: Long,
-    codecLabel: String,
-    mainViewModel: MainViewModel,
-    lyricsViewModel: LyricsViewModel
-) {
-    val lyricsState by lyricsViewModel.lyricsState.collectAsStateWithLifecycle()
-    val listState = rememberLazyListState()
-
-    val progress = (positionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
-
-    Row(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(top = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(36.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        // Left Column: Big Album Art + Metadata + D-Pad Transport Controls
-        Column(
-            modifier = Modifier.weight(0.48f),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            AlbumArtImage(
-                uri = artUri,
-                title = title,
-                artist = artist,
-                size = 250.dp,
-                shape = RoundedCornerShape(28.dp),
-                iconSize = 64.dp
-            )
-            Spacer(Modifier.height(18.dp))
-            Text(
-                text = title.ifBlank { "Nothing Playing" },
-                color = Color.White,
-                fontWeight = FontWeight.ExtraBold,
-                fontSize = 24.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = artist.ifBlank { "Select any song to start playback" },
-                color = Color.White.copy(alpha = 0.78f),
-                fontSize = 16.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Spacer(Modifier.height(8.dp))
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(50))
-                    .background(Color(0xFF00E676).copy(alpha = 0.18f))
-                    .border(1.dp, Color(0xFF00E676).copy(alpha = 0.5f), RoundedCornerShape(50))
-                    .padding(horizontal = 14.dp, vertical = 4.dp)
+        // Recent Searches Row
+        if (recentSearches.isNotEmpty() && query.isBlank()) {
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.padding(bottom = 14.dp)
             ) {
-                Text(codecLabel, color = Color(0xFF00E676), fontWeight = FontWeight.Bold, fontSize = 12.sp)
-            }
-
-            Spacer(Modifier.height(16.dp))
-            LinearProgressIndicator(
-                progress = { progress },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(6.dp)
-                    .clip(RoundedCornerShape(50)),
-                color = Color(0xFFEC4899),
-                trackColor = Color.White.copy(alpha = 0.18f)
-            )
-
-            Spacer(Modifier.height(20.dp))
-            // D-Pad Transport Controls Row
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                TvIconControl(
-                    icon = if (isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-                    onClick = { mainViewModel.toggleFavorite() }
-                )
-                TvIconControl(
-                    icon = Icons.Rounded.SkipPrevious,
-                    onClick = { mainViewModel.skipToPrevious() }
-                )
-                TvFocusableSurface(
-                    onClick = { mainViewModel.playPause() },
-                    shape = CircleShape,
-                    containerColor = Color.White,
-                    focusedContainerColor = Color(0xFFEC4899),
-                    focusedScale = 1.12f
-                ) { focused ->
-                    Box(modifier = Modifier.size(64.dp), contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                            contentDescription = "Play/Pause",
-                            tint = if (focused) Color.White else Color(0xFF5D218E),
-                            modifier = Modifier.size(34.dp)
-                        )
-                    }
+                items(recentSearches.take(10)) { q ->
+                    TvActionChip(
+                        label = q,
+                        icon = Icons.Rounded.History,
+                        onClick = {
+                            searchViewModel.onQueryChange(q)
+                            searchViewModel.onSearch(q)
+                        }
+                    )
                 }
-                TvIconControl(
-                    icon = Icons.Rounded.SkipNext,
-                    onClick = { mainViewModel.skipToNext() }
-                )
-                TvIconControl(
-                    icon = Icons.Rounded.Repeat,
-                    onClick = { mainViewModel.cycleRepeatMode() }
-                )
             }
         }
 
-        // Right Column: Big 10-Foot Synced Karaoke Lyrics Display
-        Box(
-            modifier = Modifier
-                .weight(0.52f)
-                .fillMaxHeight()
-                .clip(RoundedCornerShape(28.dp))
-                .background(Color.White.copy(alpha = 0.05f))
-                .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(28.dp))
-                .padding(24.dp)
-        ) {
-            when (val st = lyricsState) {
-                is LyricsUiState.Found -> {
-                    val synced = st.syncedLines
-                    if (synced.isNotEmpty()) {
-                        val activeIdx = remember(positionMs, synced) {
-                            synced.indexOfLast { it.first <= positionMs }.coerceAtLeast(0)
-                        }
-                        LaunchedEffect(activeIdx) {
-                            runCatching { listState.animateScrollToItem((activeIdx - 2).coerceAtLeast(0)) }
-                        }
-                        LazyColumn(
-                            state = listState,
-                            verticalArrangement = Arrangement.spacedBy(18.dp),
-                            contentPadding = PaddingValues(vertical = 40.dp)
-                        ) {
-                            itemsIndexed(synced) { idx, (lineTimeMs, lineText) ->
-                                val isCurrent = idx == activeIdx
-                                TvFocusableSurface(
-                                    onClick = { mainViewModel.seekTo(lineTimeMs) },
-                                    containerColor = if (isCurrent) Color.White.copy(alpha = 0.12f) else Color.Transparent,
-                                    focusedContainerColor = Color(0xFF6D28D9).copy(alpha = 0.55f),
-                                    showFocusRing = false
-                                ) {
-                                    Text(
-                                        text = lineText,
-                                        color = if (isCurrent) Color.White else Color.White.copy(alpha = 0.42f),
-                                        fontWeight = if (isCurrent) FontWeight.ExtraBold else FontWeight.SemiBold,
-                                        fontSize = if (isCurrent) 24.sp else 18.sp,
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 14.dp, vertical = 8.dp)
-                                    )
-                                }
+        // Results or Played History
+        if (query.isNotBlank() && searchResults.itemCount > 0) {
+            val snapshot = (0 until searchResults.itemCount.coerceAtMost(25)).mapNotNull { searchResults[it] }
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                contentPadding = PaddingValues(bottom = 32.dp),
+                modifier = Modifier.fillMaxSize()
+            ) {
+                items(searchResults.itemCount) { index ->
+                    val song = searchResults[index] ?: return@items
+                    TvCompactTrackRow(
+                        title = song.title,
+                        subtitle = song.artist,
+                        artworkUrl = song.thumbnailUrl,
+                        onClick = {
+                            searchViewModel.playSongFromSearch(song, snapshot)
+                            onOpenNowPlaying()
+                        },
+                        trailingAction = {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                TvActionChip(
+                                    label = "Save",
+                                    icon = Icons.Rounded.Download,
+                                    accentColor = TvAccentGreen,
+                                    onClick = { searchViewModel.downloadSong(song) }
+                                )
+                                TvActionChip(
+                                    label = "MP3",
+                                    icon = Icons.Rounded.SaveAlt,
+                                    onClick = { searchViewModel.exportSongAsFile(song, "mp3") }
+                                )
                             }
                         }
-                    } else {
-                        Text(
-                            text = st.result.plainLyrics ?: "No lyrics available",
-                            color = Color.White.copy(alpha = 0.85f),
-                            fontSize = 18.sp,
-                            lineHeight = 28.sp
+                    )
+                }
+            }
+        } else {
+            TvSectionHeader(
+                title = "Recently Played on TV",
+                subtitle = "Press OK on any track to resume"
+            )
+            if (playedHistory.isEmpty()) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(
+                        "Type a song name, use your TV Voice Remote, or press Recognize Song.",
+                        color = Color.White.copy(alpha = 0.6f)
+                    )
+                }
+            } else {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    contentPadding = PaddingValues(bottom = 32.dp)
+                ) {
+                    itemsIndexed(playedHistory.take(30)) { idx, item ->
+                        TvCompactTrackRow(
+                            title = item.title,
+                            subtitle = item.artist,
+                            artworkUrl = item.thumbnailUrl,
+                            indexBadge = "${idx + 1}",
+                            onClick = {
+                                searchViewModel.playHistorySong(item)
+                                onOpenNowPlaying()
+                            }
                         )
                     }
                 }
-                is LyricsUiState.Loading -> {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(color = Color.White)
-                    }
-                }
-                else -> {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("Lyrics will appear here automatically when a track plays", color = Color.White.copy(alpha = 0.6f), fontSize = 17.sp)
-                    }
-                }
             }
         }
     }
 }
 
 @Composable
-private fun TvPhoneRemotePairingContent(lanUrl: String) {
+private fun TvPhoneRemoteTab(
+    remoteUrl: String?,
+    displayTitle: String,
+    displayArtist: String
+) {
     Row(
         modifier = Modifier
             .fillMaxSize()
-            .padding(24.dp),
+            .clip(RoundedCornerShape(24.dp))
+            .background(Color.White.copy(alpha = 0.04f))
+            .padding(28.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(42.dp)
+        horizontalArrangement = Arrangement.spacedBy(32.dp)
     ) {
-        Box(
-            modifier = Modifier
-                .size(240.dp)
-                .clip(RoundedCornerShape(24.dp))
-                .background(Color.White)
-                .padding(16.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            TvPairingMatrixBadge(url = lanUrl, modifier = Modifier.fillMaxSize())
-        }
-
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Control MyPlayer TV From Your Phone", color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 28.sp)
+        Column(modifier = Modifier.weight(1f)) {
+            Text("PHONE-TO-TV WI-FI REMOTE", color = Color(0xFFC4B5FD), fontWeight = FontWeight.ExtraBold, fontSize = 13.sp)
+            Spacer(Modifier.height(10.dp))
             Text(
-                text = "1. Connect your Android or iPhone to the same Wi-Fi network as this TV.\n2. Open this address in your phone browser (or scan the pairing badge):",
-                color = Color.White.copy(alpha = 0.8f),
-                fontSize = 16.sp,
-                lineHeight = 24.sp
+                "Control MyPlayer TV from any Phone Browser",
+                color = Color.White,
+                fontSize = 26.sp,
+                fontWeight = FontWeight.ExtraBold
             )
+            Spacer(Modifier.height(12.dp))
+            Text(
+                "Scan the QR code or open the link below on any phone connected to the same Wi-Fi network. Control Play/Pause, Skip, -10s/+10s Seek, Shuffle, Repeat, Like, or type any song to play directly on TV!",
+                color = Color.White.copy(alpha = 0.72f),
+                fontSize = 15.sp,
+                lineHeight = 22.sp
+            )
+            Spacer(Modifier.height(20.dp))
             Box(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(Color(0xFF6D28D9).copy(alpha = 0.35f))
-                    .border(1.5.dp, Color(0xFFA855F7), RoundedCornerShape(16.dp))
-                    .padding(horizontal = 22.dp, vertical = 12.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(TvAccentPurple.copy(alpha = 0.25f))
+                    .padding(horizontal = 18.dp, vertical = 12.dp)
             ) {
-                Text(lanUrl, color = Color(0xFF00E676), fontWeight = FontWeight.ExtraBold, fontSize = 22.sp)
+                Text(
+                    text = remoteUrl ?: "Connect TV to Wi-Fi to start LAN Remote Server",
+                    color = Color.White,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold
+                )
             }
-            Text(
-                text = "You can Play/Pause, Skip, Seek, Like songs, and type any song name on your phone to play it on the TV immediately!",
-                color = Color.White.copy(alpha = 0.65f),
-                fontSize = 14.sp
-            )
+            if (displayTitle.isNotBlank()) {
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    "Now Playing: $displayTitle — $displayArtist",
+                    color = Color.White.copy(alpha = 0.65f),
+                    fontSize = 13.sp
+                )
+            }
         }
-    }
-}
 
-@Composable
-private fun TvIconControl(icon: ImageVector, onClick: () -> Unit) {
-    TvFocusableSurface(
-        onClick = onClick,
-        shape = CircleShape,
-        containerColor = Color.White.copy(alpha = 0.12f),
-        focusedContainerColor = Color(0xFF7C3AED),
-        focusedScale = 1.12f
-    ) {
-        Box(modifier = Modifier.size(50.dp), contentAlignment = Alignment.Center) {
-            Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(26.dp))
-        }
-    }
-}
-
-@Composable
-private fun TvSectionHeader(title: String, subtitle: String) {
-    Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(title, color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 21.sp)
-        Text(subtitle, color = Color.White.copy(alpha = 0.55f), fontSize = 13.sp)
-    }
-}
-
-@Composable
-private fun TvRecommendationSongCard(song: RecommendationSong, onClick: () -> Unit) {
-    TvFocusableSurface(
-        onClick = onClick,
-        modifier = Modifier.width(186.dp),
-        shape = RoundedCornerShape(20.dp)
-    ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            AlbumArtImage(
-                uri = song.thumbnailUrl,
-                title = song.title,
-                artist = song.artist,
-                size = 162.dp,
-                shape = RoundedCornerShape(14.dp)
-            )
-            Spacer(Modifier.height(10.dp))
-            Text(song.title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(song.artist, color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-    }
-}
-
-@Composable
-private fun TvLocalSongCard(song: SongEntity, onClick: () -> Unit) {
-    TvFocusableSurface(
-        onClick = onClick,
-        modifier = Modifier.width(186.dp),
-        shape = RoundedCornerShape(20.dp)
-    ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            AlbumArtImage(
-                uri = song.albumArt,
-                title = song.title,
-                artist = song.artist,
-                size = 162.dp,
-                shape = RoundedCornerShape(14.dp)
-            )
-            Spacer(Modifier.height(10.dp))
-            Text(song.title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(song.artist, color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (!remoteUrl.isNullOrBlank()) {
+            Box(
+                modifier = Modifier
+                    .size(230.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(Color.White)
+                    .padding(14.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                TvPairingMatrixBadge(url = remoteUrl, modifier = Modifier.fillMaxSize())
+            }
         }
     }
 }

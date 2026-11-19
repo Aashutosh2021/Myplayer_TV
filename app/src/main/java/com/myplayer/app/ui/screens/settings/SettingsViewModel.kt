@@ -1,0 +1,388 @@
+package com.myplayer.app.ui.screens.settings
+
+import android.content.Context
+import java.io.IOException
+import java.net.UnknownHostException
+import android.net.Uri
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.myplayer.app.cast.LocalCastManager
+import com.myplayer.app.data.backup.BackupRestoreManager
+import com.myplayer.app.data.local.datastore.SettingsDataStore
+import com.myplayer.app.data.local.entity.SongEntity
+import com.myplayer.app.data.local.prefs.PreferencesManager
+import com.myplayer.app.data.preferences.AudioPlaybackConfig
+import com.myplayer.app.data.preferences.AudioSettingsRepository
+import com.myplayer.app.data.preferences.ClarityPreset
+import com.myplayer.app.data.preferences.StreamQuality
+import com.myplayer.app.data.recognize.ShazamRecognizer
+import com.myplayer.app.data.repository.DownloadRepository
+import com.myplayer.app.data.sponsorblock.SponsorBlockManager
+import com.myplayer.app.data.update.InAppUpdateManager
+import com.myplayer.app.data.update.NoInternetException
+import com.myplayer.app.data.update.UpdateChecker
+import com.myplayer.app.data.update.UpdateInfo
+import com.myplayer.app.playback.MusicController
+import com.myplayer.app.playback.dsp.AutoEqManager
+import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import javax.inject.Inject
+
+sealed interface BackupRestoreState {
+    object Idle : BackupRestoreState
+    data class Loading(val progress: String? = null) : BackupRestoreState
+    data class Success(val message: String) : BackupRestoreState
+    data class Error(val error: String) : BackupRestoreState
+}
+
+sealed interface ManualUpdateState {
+    object Idle : ManualUpdateState
+    object Checking : ManualUpdateState
+    data class Available(val updateInfo: UpdateInfo) : ManualUpdateState
+    object UpToDate : ManualUpdateState
+    data class NoInternet(val message: String) : ManualUpdateState
+    data class Error(val message: String) : ManualUpdateState
+}
+
+@HiltViewModel
+class SettingsViewModel @Inject constructor(
+    @param:ApplicationContext private val context: Context,
+    private val settingsDataStore: SettingsDataStore,
+    private val musicRepository: com.myplayer.app.data.repository.MusicRepository,
+    private val downloadRepository: DownloadRepository,
+    private val preferencesManager: PreferencesManager,
+    private val backupRestoreManager: BackupRestoreManager,
+    val updateChecker: UpdateChecker,
+    val inAppUpdateManager: InAppUpdateManager,
+    val spotifyManager: com.myplayer.app.data.spotify.SpotifyIntegrationManager,
+    val youtubeManager: com.myplayer.app.data.youtube.YouTubeIntegrationManager,
+    private val audioSettingsRepository: AudioSettingsRepository,
+    val audioPlaybackStore: com.myplayer.app.data.preferences.AudioPlaybackStore,
+    val audioFeatureManagers: com.myplayer.app.playback.AudioFeatureManagers,
+    val autoEqManager: AutoEqManager,
+    val sponsorBlockManager: SponsorBlockManager,
+    val localCastManager: LocalCastManager,
+    val audioOutputRouterManager: com.myplayer.app.playback.AudioOutputRouterManager,
+    val shazamRecognizer: ShazamRecognizer,
+    val musicController: MusicController,
+    private val innertubeApi: com.myplayer.app.data.online.InnertubeApi
+) : ViewModel() {
+
+    val audioConfig = audioSettingsRepository.configFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), AudioPlaybackConfig())
+
+    val mostPlayed: StateFlow<List<SongEntity>> = musicRepository.getMostPlayedSongs()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val favoriteSongs: StateFlow<List<SongEntity>> = musicRepository.getFavoriteSongs()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val downloadedSongs: StateFlow<List<SongEntity>> = downloadRepository.getAllDownloads()
+        .map { list ->
+            list.map { d ->
+                SongEntity(
+                    id = d.id,
+                    title = d.title,
+                    artist = d.artist,
+                    album = d.album.ifBlank { "Downloaded" },
+                    duration = d.durationMs,
+                    path = d.localPath,
+                    albumArt = d.thumbnailUrl,
+                    dateAdded = d.downloadedAt,
+                    videoId = d.id
+                )
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun playSong(song: SongEntity) {
+        musicController.playSongs(listOf(song), 0)
+    }
+
+    val isSpotifyLoggedIn = spotifyManager.isLoggedIn
+    val spotifyUsername = spotifyManager.username
+    val isSpotifySyncing = spotifyManager.isSyncing
+
+    private val _spotifySyncMessage = MutableStateFlow<String?>(null)
+    val spotifySyncMessage = _spotifySyncMessage.asStateFlow()
+
+    val isYouTubeLoggedIn = youtubeManager.isLoggedIn
+    val youtubeUsername = youtubeManager.username
+    val isYouTubeSyncing = youtubeManager.isSyncing
+
+    fun clearSpotifySyncMessage() {
+        _spotifySyncMessage.value = null
+    }
+
+    fun showStatusMessage(msg: String) {
+        _spotifySyncMessage.value = msg
+    }
+
+    fun syncSpotify() {
+        viewModelScope.launch {
+            val res = spotifyManager.syncAllSpotifyLibraryAndPlaylists()
+            res.onSuccess { result ->
+                _spotifySyncMessage.value = "Synced ${result.playlistsCount} playlists & ${result.totalTracksSynced} songs from Spotify!"
+            }.onFailure { e ->
+                _spotifySyncMessage.value = com.myplayer.app.playback.userErrorMessage("Spotify sync failed. Please try again.", e)
+            }
+        }
+    }
+
+    fun syncSpotifyTaste() {
+        syncSpotify()
+    }
+
+    fun logoutSpotify() {
+        spotifyManager.logout()
+    }
+
+    fun syncYouTube() {
+        viewModelScope.launch {
+            val res = youtubeManager.syncAllYouTubeLibraryAndPlaylists()
+            res.onSuccess { result ->
+                _spotifySyncMessage.value =
+                    "Synced ${result.playlistsCount} YouTube playlists, ${result.likedSongsCount} liked songs & ${result.recommendationsCount} AI recommendations!"
+            }.onFailure { e ->
+                _spotifySyncMessage.value = com.myplayer.app.playback.userErrorMessage("YouTube sync failed. Please try again.", e)
+            }
+        }
+    }
+
+    fun importYouTubePlaylist(urlOrId: String) {
+        viewModelScope.launch {
+            _spotifySyncMessage.value = "Importing YouTube playlist..."
+            val res = youtubeManager.importPlaylistByUrl(urlOrId)
+            res.onSuccess { (title, count) ->
+                _spotifySyncMessage.value = "Imported '$title' ($count songs) from YouTube!"
+            }.onFailure { e ->
+                _spotifySyncMessage.value = com.myplayer.app.playback.userErrorMessage("Failed to import YouTube playlist.", e)
+            }
+        }
+    }
+
+    fun logoutYouTube() {
+        youtubeManager.logout()
+    }
+
+    private val _backupState = MutableStateFlow<BackupRestoreState>(BackupRestoreState.Idle)
+    val backupState = _backupState.asStateFlow()
+
+    private val _restoreState = MutableStateFlow<BackupRestoreState>(BackupRestoreState.Idle)
+    val restoreState = _restoreState.asStateFlow()
+
+    private val _updateState = MutableStateFlow<ManualUpdateState>(ManualUpdateState.Idle)
+    val updateState = _updateState.asStateFlow()
+
+    val isAutoplayEnabled = settingsDataStore.isAutoplayEnabled
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
+
+    val downloadFolderUri = preferencesManager.downloadFolderUri
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    val localFolders = musicRepository.getAllFolders()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val localSongsCount = musicRepository.getAllSongs().map { songs ->
+        songs.count { !it.path.startsWith("online://") && !it.id.startsWith("spotify:") }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+
+    private val _isScanningLocal = MutableStateFlow(false)
+    val isScanningLocal = _isScanningLocal.asStateFlow()
+
+    fun addLocalMusicFolder(uri: String, name: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _isScanningLocal.value = true
+            try {
+                musicRepository.addFolder(uri, name)
+                _spotifySyncMessage.value = "Added local music folder '$name' & scanned audio files!"
+            } catch (e: Exception) {
+                _spotifySyncMessage.value = com.myplayer.app.playback.userErrorMessage("Failed to scan folder.", e)
+            } finally {
+                _isScanningLocal.value = false
+            }
+        }
+    }
+
+    fun removeLocalMusicFolder(folder: com.myplayer.app.data.local.entity.FolderEntity) {
+        viewModelScope.launch(Dispatchers.IO) {
+            musicRepository.removeFolder(folder)
+            _spotifySyncMessage.value = "Removed folder '${folder.name}'."
+        }
+    }
+
+    fun rescanLocalMusic() {
+        viewModelScope.launch(Dispatchers.IO) {
+            _isScanningLocal.value = true
+            try {
+                musicRepository.rescanAllFolders()
+                _spotifySyncMessage.value = "Scanned local storage for audio files! Open Library > Local Files to play."
+            } catch (e: Exception) {
+                _spotifySyncMessage.value = com.myplayer.app.playback.userErrorMessage("Local scan failed.", e)
+            } finally {
+                _isScanningLocal.value = false
+            }
+        }
+    }
+
+    val userName = settingsDataStore.userName
+        .stateIn(viewModelScope, SharingStarted.Eagerly, "")
+
+    fun setAutoplayEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsDataStore.setAutoplayEnabled(enabled)
+        }
+    }
+
+    fun setUserName(name: String) {
+        viewModelScope.launch {
+            settingsDataStore.setUserName(name)
+        }
+    }
+
+    fun setDownloadFolder(uri: String?) {
+        viewModelScope.launch {
+            preferencesManager.setDownloadFolderUri(uri)
+        }
+    }
+
+    fun updateWifiQuality(quality: StreamQuality) {
+        viewModelScope.launch { audioSettingsRepository.updateWifiQuality(quality) }
+    }
+
+    fun updateMobileQuality(quality: StreamQuality) {
+        viewModelScope.launch { audioSettingsRepository.updateMobileQuality(quality) }
+    }
+
+    fun updateClarityPreset(preset: ClarityPreset) {
+        viewModelScope.launch { audioSettingsRepository.updateClarityPreset(preset) }
+    }
+
+    fun updateTrueDolby(enabled: Boolean, width: Float = 0.45f) {
+        viewModelScope.launch { audioSettingsRepository.updateTrueDolby(enabled, width) }
+    }
+
+    fun updateLoudness(enabled: Boolean, gainMb: Int = 600) {
+        viewModelScope.launch { audioSettingsRepository.updateLoudness(enabled, gainMb) }
+    }
+
+    fun updateSkipSilence(enabled: Boolean) {
+        viewModelScope.launch { audioSettingsRepository.updateSkipSilence(enabled) }
+    }
+
+    fun resetStates() {
+        _backupState.value = BackupRestoreState.Idle
+        _restoreState.value = BackupRestoreState.Idle
+    }
+
+    fun checkForUpdates() {
+        _updateState.value = ManualUpdateState.Checking
+        viewModelScope.launch {
+            try {
+                if (!updateChecker.isOnline()) {
+                    _updateState.value = ManualUpdateState.NoInternet(
+                        "No internet connection. Please turn off Airplane Mode or connect to Wi-Fi / mobile data and try again."
+                    )
+                    return@launch
+                }
+                val update = updateChecker.checkForUpdate()
+                if (update != null) {
+                    _updateState.value = ManualUpdateState.Available(update)
+                } else {
+                    _updateState.value = ManualUpdateState.UpToDate
+                }
+            } catch (e: NoInternetException) {
+                _updateState.value = ManualUpdateState.NoInternet(
+                    com.myplayer.app.playback.userErrorMessage("No internet connection detected.", e)
+                )
+            } catch (e: UnknownHostException) {
+                _updateState.value = ManualUpdateState.NoInternet(
+                    "Unable to reach GitHub. Please check your internet connection or turn off Airplane Mode."
+                )
+            } catch (e: Exception) {
+                val errorMsg = when {
+                    e.message?.contains("Unable to resolve host", ignoreCase = true) == true ->
+                        "No internet connection. Please turn off Airplane Mode or check your network."
+                    e.message?.contains("rate limit", ignoreCase = true) == true ->
+                        "GitHub rate limit reached. Please try again later."
+                    else ->
+                        com.myplayer.app.playback.userErrorMessage("Failed to check for updates. Please try again later.", e)
+                }
+                _updateState.value = ManualUpdateState.Error(errorMsg)
+            }
+        }
+    }
+
+    fun resetUpdateState() {
+        _updateState.value = ManualUpdateState.Idle
+    }
+
+    fun exportBackup(uri: Uri) {
+        _backupState.value = BackupRestoreState.Loading()
+        viewModelScope.launch {
+            try {
+                val json = backupRestoreManager.generateBackup()
+                withContext(Dispatchers.IO) {
+                    context.contentResolver.openOutputStream(uri)?.use { output ->
+                        output.write(json.toByteArray(Charsets.UTF_8))
+                    } ?: throw IOException("Could not open file for writing")
+                }
+                _backupState.value = BackupRestoreState.Success("Backup created successfully!")
+            } catch (e: Exception) {
+                _backupState.value = BackupRestoreState.Error(
+                    com.myplayer.app.playback.userErrorMessage("Failed to write backup file.", e)
+                )
+            }
+        }
+    }
+
+    fun importBackup(uri: Uri) {
+        _restoreState.value = BackupRestoreState.Loading()
+        viewModelScope.launch {
+            try {
+                val json = withContext(Dispatchers.IO) {
+                    context.contentResolver.openInputStream(uri)?.use { input ->
+                        input.bufferedReader().use { it.readText() }
+                    } ?: throw IOException("Could not read backup file")
+                }
+                backupRestoreManager.restoreBackup(json)
+                _restoreState.value = BackupRestoreState.Success(
+                    "Backup restored! Playlists are ready — missing downloads will be re-downloaded in the background."
+                )
+            } catch (e: Exception) {
+                _restoreState.value = BackupRestoreState.Error(
+                    com.myplayer.app.playback.userErrorMessage("Failed to restore backup file.", e)
+                )
+            }
+        }
+    }
+
+    fun playRecognizedSong(title: String, artist: String, coverUrl: String?) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val query = "$title $artist".trim()
+            val found = runCatching {
+                innertubeApi.search(query, filtered = true).songs.firstOrNull()
+                    ?: innertubeApi.search(query, filtered = false).songs.firstOrNull()
+            }.getOrNull()
+            if (found != null) {
+                val track = if (found.thumbnailUrl.isBlank() && !coverUrl.isNullOrBlank()) {
+                    found.copy(thumbnailUrl = coverUrl)
+                } else {
+                    found
+                }
+                withContext(Dispatchers.Main) {
+                    musicController.playOnlineSong(track)
+                }
+            }
+        }
+    }
+}

@@ -10,12 +10,14 @@
     <!-- Wake lock for ExoPlayer WAKE_MODE_NETWORK during screen-off playback -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- In-App APK Update Installation Permission (ported from MyPlayer) -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- Foreground service for music playback -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <!-- Phone-Mic Active Noise Cancellation (ANC) & Transparency Mode -->
+    <!-- Microphone permission for song recognition -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <!-- Local audio file access across Android versions -->
@@ -28,22 +30,25 @@
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28"
         tools:ignore="ScopedStorage" />
-
     <!-- Permission to bind to AriaService. Restricted to same-certificate applications -->
     <permission
         android:name="com.myplayer.app.permission.ARIA_CONNECT"
         android:protectionLevel="normal" />
     <uses-permission android:name="com.myplayer.app.permission.ARIA_CONNECT" />
-
-        <!-- Android TV / Google TV / Fire TV Leanback Support (Works on both Phone & TV!) -->
-    <uses-feature android:name="android.software.leanback" android:required="false" />
-    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
-    <uses-feature android:name="android.hardware.microphone" android:required="false" />
-
+    <!-- Android TV / Google TV / Fire TV Support (optional so mobile devices stay compatible) -->
+    <uses-feature
+        android:name="android.software.leanback"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.touchscreen"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.microphone"
+        android:required="false" />
     <application
-        android:banner="@drawable/tv_banner"
         android:name=".MyPlayerApplication"
         android:allowBackup="true"
+        android:banner="@drawable/tv_banner"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"
@@ -62,7 +67,6 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <!-- Android TV / Google TV / Fire TV Leanback Launcher Activity -->
         <activity
             android:name=".tv.TvMainActivity"
             android:exported="true"
@@ -70,19 +74,16 @@
             android:banner="@drawable/tv_banner"
             android:launchMode="singleTask"
             android:screenOrientation="landscape"
-            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density"
             android:theme="@style/Theme.MyPlayer">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
-            <!-- Voice Search on TV Remote: "Play ... on MyPlayer" -->
             <intent-filter>
                 <action android:name="android.media.action.MEDIA_PLAY_FROM_SEARCH" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
-
         <service
             android:name=".playback.MusicService"
             android:foregroundServiceType="mediaPlayback"
@@ -114,5 +115,14 @@
             android:name="androidx.work.impl.foreground.SystemForegroundService"
             android:foregroundServiceType="dataSync"
             tools:node="merge" />
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 </manifest>

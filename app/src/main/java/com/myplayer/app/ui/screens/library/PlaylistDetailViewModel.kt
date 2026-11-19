@@ -1,0 +1,287 @@
+package com.myplayer.app.ui.screens.library
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.myplayer.app.data.local.entity.PlaylistEntity
+import com.myplayer.app.data.online.InnertubeApi
+import com.myplayer.app.data.online.model.OnlineSong
+import com.myplayer.app.data.repository.DownloadRepository
+import com.myplayer.app.data.repository.HybridLibraryRepository
+import com.myplayer.app.data.repository.MusicRepository
+import com.myplayer.app.data.repository.PlayableSong
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import javax.inject.Inject
+
+private val ytIdPattern = Regex("^[a-zA-Z0-9_-]{11}$")
+
+internal suspend fun resolveToOnlineSong(
+    song: PlayableSong.Online,
+    innertubeApi: InnertubeApi,
+    repository: MusicRepository
+): OnlineSong? {
+    val rawId = song.id.removePrefix("online://").removePrefix("spotify:").trim()
+    val realYtId = if (ytIdPattern.matches(rawId)) {
+        rawId
+    } else {
+        val query = "${song.title} ${song.artist}".trim()
+        val matched = runCatching {
+            innertubeApi.search(query, filtered = true).songs.firstOrNull()?.videoId
+                ?: innertubeApi.search(query, filtered = false).songs.firstOrNull()?.videoId
+        }.getOrNull()
+        if (!matched.isNullOrBlank()) {
+            repository.cacheResolvedYoutubeId(song.id, rawId, matched)
+        }
+        matched
+    } ?: return null
+
+    val streamUrl = innertubeApi.getCachedStreamUrl(realYtId) ?: innertubeApi.getStreamUrl(realYtId)
+    if (streamUrl.isNullOrBlank()) return null
+
+    return OnlineSong(
+        videoId = realYtId,
+        title = song.title,
+        artist = song.artist,
+        thumbnailUrl = song.thumbnailUrl ?: "",
+        durationMs = song.durationMs,
+        durationText = "",
+        streamUrl = streamUrl
+    )
+}
+
+@OptIn(ExperimentalCoroutinesApi::class)
+@HiltViewModel
+class PlaylistDetailViewModel @Inject constructor(
+    private val repository: MusicRepository,
+    private val hybridLibraryRepository: HybridLibraryRepository,
+    private val downloadRepository: DownloadRepository,
+    private val innertubeApi: InnertubeApi
+) : ViewModel() {
+
+    private val _playlistId = MutableStateFlow(-1L)
+    private val youtubeIdRegex = Regex("^[a-zA-Z0-9_-]{11}$")
+    private var prewarmJob: Job? = null
+    private val prewarmSemaphore = Semaphore(3)
+    private val _resolvingIds = MutableStateFlow<Set<String>>(emptySet())
+    val resolvingIds: StateFlow<Set<String>> = _resolvingIds.asStateFlow()
+
+    val playlist: StateFlow<PlaylistEntity?> = _playlistId.flatMapLatest { id ->
+        repository.getAllPlaylists().map { list -> list.find { it.id == id } }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    val songs: StateFlow<List<PlayableSong>> = _playlistId.flatMapLatest { id ->
+        repository.getSongsInPlaylistAsPlayable(id)
+    }.onEach { songList ->
+        prewarmSpotifyPlaylistSongs(songList)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /** All songs available in the user's library (local + downloaded) to pick from */
+    val libraryForPicker: StateFlow<List<PlayableSong>> =
+        hybridLibraryRepository.getHybridLibrary()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val playlistDownloadProgress: StateFlow<Pair<Int, Int>?> = combine(
+        _playlistId,
+        downloadRepository.playlistBatchStatus
+    ) { id, statusMap -> statusMap[id] }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    fun toggleDownloadRemainingSongs() {
+        val pid = _playlistId.value
+        if (pid <= 0L) return
+        if (playlistDownloadProgress.value != null) {
+            downloadRepository.cancelPlaylistBatchDownload(pid)
+            return
+        }
+        val remaining = songs.value.filterIsInstance<PlayableSong.Online>()
+        downloadRepository.startSequentialDownloads(pid, remaining) { song ->
+            resolveToOnlineSong(song, innertubeApi, repository)
+        }
+    }
+
+    fun setPlaylistId(id: Long) {
+        _playlistId.value = id
+    }
+
+    /**
+     * Background pre-resolver: Jaise hi user Spotify playlist open karega,
+     * unresolving Spotify songs ke 11-char YouTube videoId resolve karke DB me save kar dega
+     * aur starting songs ke stream URLs bhi cache kar lega taaki click karte hi 0-delay play ho!
+     */
+    private fun prewarmSpotifyPlaylistSongs(songList: List<PlayableSong>) {
+        val unresolved = songList.mapNotNull { song ->
+            when (song) {
+                is PlayableSong.Online -> {
+                    val candidate = song.id.removePrefix("online://").removePrefix("spotify:").trim()
+                    if (!youtubeIdRegex.matches(candidate)) song else null
+                }
+                is PlayableSong.Local -> {
+                    val candidate = (song.entity.videoId ?: song.entity.path.removePrefix("online://"))
+                        .removePrefix("spotify:")
+                        .trim()
+                    if (song.entity.path.startsWith("online://") && !youtubeIdRegex.matches(candidate)) {
+                        PlayableSong.Online(
+                            id = candidate,
+                            title = song.entity.title,
+                            artist = song.entity.artist,
+                            durationMs = song.entity.duration,
+                            thumbnailUrl = song.entity.albumArt
+                        )
+                    } else null
+                }
+                else -> null
+            }
+        }
+
+        if (unresolved.isEmpty()) return
+        prewarmJob?.cancel()
+        prewarmJob = viewModelScope.launch(Dispatchers.IO) {
+            unresolved.forEachIndexed { index, song ->
+                prewarmSemaphore.withPermit {
+                    val rawId = song.id.removePrefix("online://").removePrefix("spotify:").trim()
+                    val query = "${song.title} ${song.artist}".trim()
+                    val matchedYtId = runCatching {
+                        innertubeApi.search(query, filtered = true).songs.firstOrNull()?.videoId
+                            ?: innertubeApi.search(query, filtered = false).songs.firstOrNull()?.videoId
+                    }.getOrNull()
+
+                    if (!matchedYtId.isNullOrBlank()) {
+                        repository.cacheResolvedYoutubeId(
+                            originalId = song.id,
+                            rawSpotifyId = rawId,
+                            youtubeVideoId = matchedYtId
+                        )
+                        // First 5 songs ka stream URL bhi pre-fetch kar lo instant click playback ke liye
+                        if (index < 5) {
+                            runCatching { innertubeApi.getStreamUrl(matchedYtId) }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fun removeSong(songId: String) {
+        viewModelScope.launch {
+            repository.removeSongFromPlaylist(_playlistId.value, songId)
+        }
+    }
+
+    fun renamePlaylist(newName: String) {
+        viewModelScope.launch {
+            repository.renamePlaylist(_playlistId.value, newName)
+        }
+    }
+
+    fun addSong(song: PlayableSong) {
+        viewModelScope.launch {
+            val currentCount = songs.value.size
+            repository.addSongToPlaylist(_playlistId.value, song, currentCount)
+        }
+    }
+
+    /** Add multiple songs at once */
+    fun addSongs(songList: List<PlayableSong>) {
+        viewModelScope.launch {
+            val currentCount = songs.value.size
+            songList.forEachIndexed { i, song ->
+                repository.addSongToPlaylist(_playlistId.value, song, currentCount + i)
+            }
+        }
+    }
+
+    /** Save reordered list of song IDs */
+    fun saveReorder(newOrderIds: List<String>, onComplete: () -> Unit = {}) {
+        viewModelScope.launch {
+            try {
+                repository.reorderSongsInPlaylist(_playlistId.value, newOrderIds)
+            } finally {
+                onComplete()
+            }
+        }
+    }
+
+    fun addSongToPlaylist(playlistId: Long, song: PlayableSong) {
+        viewModelScope.launch {
+            repository.addSongToPlaylist(playlistId, song, 0)
+        }
+    }
+
+    fun deleteDownload(videoId: String) {
+        viewModelScope.launch {
+            downloadRepository.deleteDownloadById(videoId)
+        }
+    }
+
+    private val _exportStatusMessage = MutableStateFlow<String?>(null)
+    val exportStatusMessage: StateFlow<String?> = _exportStatusMessage.asStateFlow()
+    fun clearExportStatusMessage() { _exportStatusMessage.value = null }
+
+    fun exportSongAsFile(song: PlayableSong, formatExt: String = "mp3") {
+        viewModelScope.launch(Dispatchers.IO) {
+            val extLabel = formatExt.uppercase()
+            _exportStatusMessage.value = "Saving '${song.title}' as .$extLabel to device storage..."
+            try {
+                val rawId = song.id.removePrefix("online://").removePrefix("spotify:").trim()
+                val realYtId = if (youtubeIdRegex.matches(rawId)) {
+                    rawId
+                } else {
+                    val query = "${song.title} ${song.artist}".trim()
+                    runCatching {
+                        innertubeApi.search(query, filtered = true).songs.firstOrNull()?.videoId
+                            ?: innertubeApi.search(query, filtered = false).songs.firstOrNull()?.videoId
+                    }.getOrNull() ?: rawId
+                }
+
+                val localOrStreamUrl = when (song) {
+                    is PlayableSong.Downloaded -> song.entity.localPath
+                    is PlayableSong.Local -> song.entity.path.takeIf { !it.startsWith("online://") }
+                    else -> null
+                } ?: innertubeApi.getCachedStreamUrl(realYtId) ?: innertubeApi.getStreamUrl(realYtId)
+
+                val res = downloadRepository.exportSongToDeviceStorage(
+                    OnlineSong(
+                        videoId = realYtId,
+                        title = song.title,
+                        artist = song.artist,
+                        thumbnailUrl = song.thumbnailUrl ?: "",
+                        durationMs = song.durationMs,
+                        streamUrl = localOrStreamUrl
+                    ),
+                    formatExt = formatExt
+                )
+                res.onSuccess { savedLoc ->
+                    _exportStatusMessage.value = "Saved $extLabel to: $savedLoc"
+                }.onFailure { err ->
+                    _exportStatusMessage.value = com.myplayer.app.playback.userErrorMessage("Failed to save $extLabel file.", err)
+                }
+            } catch (e: Exception) {
+                _exportStatusMessage.value = com.myplayer.app.playback.userErrorMessage("Failed to save $extLabel file.", e)
+            }
+        }
+    }
+
+    fun downloadSong(song: PlayableSong.Online) {
+        if (_resolvingIds.value.contains(song.id)) return
+        _resolvingIds.value = _resolvingIds.value + song.id
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                resolveToOnlineSong(song, innertubeApi, repository)?.let {
+                    downloadRepository.startDownload(it)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("PlaylistDetailViewModel", "Failed to start download for ${song.title}", e)
+            } finally {
+                _resolvingIds.value = _resolvingIds.value - song.id
+            }
+        }
+    }
+}
+
+

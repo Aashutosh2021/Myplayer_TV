@@ -1,0 +1,4 @@
+E:/MyPlayer/MyPlayer_TV/app/.cxx/RelWithDebInfo/5p40d6tc/armeabi-v7a/CMakeFiles/myplayer_security.dir
+E:/MyPlayer/MyPlayer_TV/app/.cxx/RelWithDebInfo/5p40d6tc/armeabi-v7a/CMakeFiles/lastwave_audio_engine.dir
+E:/MyPlayer/MyPlayer_TV/app/.cxx/RelWithDebInfo/5p40d6tc/armeabi-v7a/CMakeFiles/edit_cache.dir
+E:/MyPlayer/MyPlayer_TV/app/.cxx/RelWithDebInfo/5p40d6tc/armeabi-v7a/CMakeFiles/rebuild_cache.dir

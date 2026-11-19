@@ -1,0 +1,45 @@
+{
+  "buildFiles": [
+    "E:\\MyPlayer\\MyPlayer_TV\\app\\src\\main\\cpp\\CMakeLists.txt"
+  ],
+  "cleanCommandsComponents": [
+    [
+      "C:\\Android\\cmake\\3.22.1\\bin\\ninja.exe",
+      "-C",
+      "E:\\MyPlayer\\MyPlayer_TV\\app\\.cxx\\RelWithDebInfo\\5p40d6tc\\arm64-v8a",
+      "clean"
+    ]
+  ],
+  "buildTargetsCommandComponents": [
+    "C:\\Android\\cmake\\3.22.1\\bin\\ninja.exe",
+    "-C",
+    "E:\\MyPlayer\\MyPlayer_TV\\app\\.cxx\\RelWithDebInfo\\5p40d6tc\\arm64-v8a",
+    "{LIST_OF_TARGETS_TO_BUILD}"
+  ],
+  "libraries": {
+    "lastwave_audio_engine::@6890427a1f51a3e7e1df": {
+      "toolchain": "toolchain",
+      "abi": "arm64-v8a",
+      "artifactName": "lastwave_audio_engine",
+      "output": "E:\\MyPlayer\\MyPlayer_TV\\app\\build\\intermediates\\cxx\\RelWithDebInfo\\5p40d6tc\\obj\\arm64-v8a\\liblastwave_audio_engine.so",
+      "runtimeFiles": []
+    },
+    "myplayer_security::@6890427a1f51a3e7e1df": {
+      "toolchain": "toolchain",
+      "abi": "arm64-v8a",
+      "artifactName": "myplayer_security",
+      "output": "E:\\MyPlayer\\MyPlayer_TV\\app\\build\\intermediates\\cxx\\RelWithDebInfo\\5p40d6tc\\obj\\arm64-v8a\\libmyplayer_security.so",
+      "runtimeFiles": []
+    }
+  },
+  "toolchains": {
+    "toolchain": {
+      "cCompilerExecutable": "C:\\Android\\ndk\\28.2.13676358\\toolchains\\llvm\\prebuilt\\windows-x86_64\\bin\\clang.exe",
+      "cppCompilerExecutable": "C:\\Android\\ndk\\28.2.13676358\\toolchains\\llvm\\prebuilt\\windows-x86_64\\bin\\clang++.exe"
+    }
+  },
+  "cFileExtensions": [],
+  "cppFileExtensions": [
+    "cpp"
+  ]
+}

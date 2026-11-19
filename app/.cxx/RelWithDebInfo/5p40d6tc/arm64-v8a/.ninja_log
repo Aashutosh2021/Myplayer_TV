@@ -1,0 +1,7 @@
+# ninja log v5
+11	5030	8167785057098167	CMakeFiles/myplayer_security.dir/native-lib.cpp.o	aae434a78ca2c78
+6	5054	8167785057318200	CMakeFiles/lastwave_audio_engine.dir/AudioEngine.cpp.o	392c0eb1a3387eef
+16	5067	8167785057423387	CMakeFiles/lastwave_audio_engine.dir/ParametricEq.cpp.o	2e0da84ea479fc25
+5035	5185	8167785058647102	E:/MyPlayer/MyPlayer_TV/app/build/intermediates/cxx/RelWithDebInfo/5p40d6tc/obj/arm64-v8a/libmyplayer_security.so	7da9aa163ea9d6ca
+0	5387	8167785060595794	CMakeFiles/lastwave_audio_engine.dir/DspProcessor.cpp.o	8ac84b8aa8bed2da
+5387	5489	8167785061721375	E:/MyPlayer/MyPlayer_TV/app/build/intermediates/cxx/RelWithDebInfo/5p40d6tc/obj/arm64-v8a/liblastwave_audio_engine.so	2b3700a6621a16b7

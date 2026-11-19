@@ -1,0 +1,83 @@
+package com.myplayer.app.data.repository
+
+import com.myplayer.app.data.local.dao.FolderDao
+import com.myplayer.app.data.local.dao.SongDao
+import com.myplayer.app.data.local.entity.FolderEntity
+import com.myplayer.app.data.local.entity.SongEntity
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.withContext
+import javax.inject.Inject
+import javax.inject.Singleton
+
+/**
+ * Repository owning scanned songs, directory folders, scanning, and metadata play counts.
+ * Standardizes Dispatchers.IO for SQLite transactions and structured error handling.
+ */
+@Singleton
+class SongRepository @Inject constructor(
+    private val songDao: SongDao,
+    private val folderDao: FolderDao,
+    private val mediaScanner: MediaScanner
+) {
+    // Queries
+    fun getAllSongs(): Flow<List<SongEntity>> = songDao.getAllSongs()
+    fun getTrendingSongs(): Flow<List<SongEntity>> = songDao.getTrendingSongs()
+    fun getRecentlyAddedSongs(): Flow<List<SongEntity>> = songDao.getRecentlyAddedSongs()
+    fun getMostPlayedSongs(): Flow<List<SongEntity>> = songDao.getMostPlayedSongs()
+    fun searchSongs(query: String): Flow<List<SongEntity>> = songDao.searchSongs(query)
+
+    suspend fun incrementPlayCount(songId: String) = withContext(Dispatchers.IO) {
+        try {
+            songDao.incrementPlayCount(songId)
+        } catch (e: Exception) {
+            android.util.Log.e("SongRepository", "Failed to increment play count for $songId", e)
+        }
+    }
+
+    // Folder Management & Local Audio Scanning
+    fun getAllFolders(): Flow<List<FolderEntity>> = folderDao.getAllFolders()
+
+    suspend fun addFolder(uri: String, name: String) = withContext(Dispatchers.IO) {
+        val folder = FolderEntity(uri = uri.trim(), name = name.trim().ifBlank { "Local Music" })
+        folderDao.clearAllFolders()
+        folderDao.addFolder(folder)
+        mediaScanner.scanAllFolders()
+    }
+
+    suspend fun removeFolder(folder: FolderEntity) = withContext(Dispatchers.IO) {
+        folderDao.deleteFolder(folder)
+        songDao.clearAllLocalSongs()
+        if (folderDao.getFoldersSync().isNotEmpty()) {
+            mediaScanner.scanAllFolders()
+        }
+    }
+
+    suspend fun rescanAllFolders() = withContext(Dispatchers.IO) {
+        mediaScanner.scanAllFolders()
+    }
+
+    suspend fun getSongById(id: String): SongEntity? = withContext(Dispatchers.IO) {
+        songDao.getSongById(id)
+    }
+
+    suspend fun cacheResolvedYoutubeId(
+        originalId: String,
+        rawSpotifyId: String,
+        youtubeVideoId: String
+    ) = withContext(Dispatchers.IO) {
+        val existing = songDao.getSongById(originalId)
+            ?: songDao.getSongById("spotify:$rawSpotifyId")
+            ?: songDao.getSongById(rawSpotifyId)
+            ?: songDao.getSongById("online://$rawSpotifyId")
+        if (existing != null) {
+            val updated = existing.copy(
+                videoId = youtubeVideoId,
+                path = "online://$youtubeVideoId"
+            )
+            songDao.insertSong(updated)
+            songDao.updateSongVideoId(existing.id, youtubeVideoId)
+            songDao.updateSongPath(existing.id, "online://$youtubeVideoId")
+        }
+    }
+}

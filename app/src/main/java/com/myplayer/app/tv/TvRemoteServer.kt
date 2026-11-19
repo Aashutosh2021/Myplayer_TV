@@ -129,6 +129,10 @@ class TvRemoteServer(
               <button onclick="send('fav')">❤️ Like</button>
               <button onclick="send('seek_fwd')">+10s ⏩</button>
             </div>
+            <div class="row">
+              <button onclick="send('shuffle')">🔀 Shuffle</button>
+              <button onclick="send('repeat')">🔁 Repeat</button>
+            </div>
             <div style="margin-top:20px;display:flex;gap:8px;justify-content:center;">
               <input id="q" placeholder="Search & Play song on TV..." />
               <button class="primary" style="padding:12px 18px;" onclick="playSearch()">Play</button>

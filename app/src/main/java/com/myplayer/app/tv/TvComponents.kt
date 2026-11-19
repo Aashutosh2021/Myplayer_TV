@@ -193,7 +193,7 @@ fun TvPosterCard(
                     .background(Color(0xFF232338))
             ) {
                 AlbumArtImage(
-                    data = artworkUrl,
+                    uri = artworkUrl,
                     contentDescription = title,
                     modifier = Modifier.fillMaxSize()
                 )
@@ -293,7 +293,7 @@ fun TvCompactTrackRow(
                     )
                 }
                 AlbumArtImage(
-                    data = artworkUrl,
+                    uri = artworkUrl,
                     contentDescription = title,
                     modifier = Modifier
                         .size(46.dp)

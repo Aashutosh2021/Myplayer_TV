@@ -115,7 +115,7 @@ fun TvNowPlayingScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 AlbumArtImage(
-                    data = displayArt,
+                    uri = displayArt,
                     contentDescription = displayTitle,
                     modifier = Modifier
                         .size(164.dp)

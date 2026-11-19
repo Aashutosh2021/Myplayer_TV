@@ -589,7 +589,7 @@ fun TvAudioLabAndSettingsTab(
                             is ManualUpdateState.Idle -> "Press to check for new MyPlayer updates"
                             is ManualUpdateState.Checking -> "Checking for updates..."
                             is ManualUpdateState.UpToDate -> "You are running the latest version!"
-                            is ManualUpdateState.Available -> "Update Available: v${u.updateInfo.latestVersion}"
+                            is ManualUpdateState.Available -> "Update Available: v${u.updateInfo.versionName}"
                             is ManualUpdateState.NoInternet -> u.message
                             is ManualUpdateState.Error -> u.message
                         }

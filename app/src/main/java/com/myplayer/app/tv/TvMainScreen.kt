@@ -207,7 +207,7 @@ fun TvMainScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             AlbumArtImage(
-                                data = displayArt,
+                                uri = displayArt,
                                 contentDescription = displayTitle,
                                 modifier = Modifier
                                     .size(30.dp)
@@ -604,13 +604,13 @@ private fun TvSearchAndShazamTab(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.padding(bottom = 14.dp)
             ) {
-                items(recentSearches.take(10)) { q ->
+                items(recentSearches.take(10)) { item ->
                     TvActionChip(
-                        label = q,
+                        label = item.query,
                         icon = Icons.Rounded.History,
                         onClick = {
-                            searchViewModel.onQueryChange(q)
-                            searchViewModel.onSearch(q)
+                            searchViewModel.onQueryChange(item.query)
+                            searchViewModel.onSearch(item.query)
                         }
                     )
                 }
